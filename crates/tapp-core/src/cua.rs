@@ -48,13 +48,32 @@ impl CuaClient {
             .await
             .context("failed to run cua-driver")?;
 
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("cua-driver call {} failed: {}", tool, stderr);
+            // Try to parse stdout for a structured error from the daemon
+            if let Ok(err_resp) = serde_json::from_str::<Value>(&stdout) {
+                if let Some(err_msg) = err_resp["error"].as_str() {
+                    anyhow::bail!("cua-driver call {} failed: {}", tool, err_msg);
+                }
+                if let Some(err_msg) = err_resp["message"].as_str() {
+                    anyhow::bail!("cua-driver call {} failed: {}", tool, err_msg);
+                }
+            }
+            // Fall back to stderr, then a generic message
+            if !stderr.is_empty() {
+                anyhow::bail!("cua-driver call {} failed: {}", tool, stderr.trim());
+            }
+            anyhow::bail!(
+                "cua-driver call {} failed: exit code {}",
+                tool,
+                output.status.code().unwrap_or(-1)
+            );
         }
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let response: Value = serde_json::from_str(&stdout)?;
+        let response: Value = serde_json::from_str(&stdout)
+            .with_context(|| format!("cua-driver call {} returned invalid json: {}", tool, &stdout[..stdout.len().min(200)]))?;
         Ok(response)
     }
 
