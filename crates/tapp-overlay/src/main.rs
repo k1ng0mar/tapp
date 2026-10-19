@@ -1,7 +1,7 @@
 //! Tapp cursor overlay.
 //!
 //! Shows a visual cursor that moves to the target before the agent clicks.
-//! This is the Clicky pattern: the user sees what the agent is about to do.
+//! The user sees what the agent is about to do.
 
 use anyhow::Result;
 use std::io::{self, BufRead, Write};

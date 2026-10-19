@@ -16,7 +16,7 @@ Tapp follows an adapter pattern: one core engine, multiple harness integrations.
 
 - `tapp-core`: shared types and cua client. talks to cua-driver over a unix socket.
 - `tapp-mcp`: MCP server exposing `tapp_*` tools to Pantheon or any MCP harness.
-- `tapp-overlay`: cursor overlay binary (Clicky pattern). shows where the agent is about to click.
+- `tapp-overlay`: cursor overlay binary. shows where the agent is about to click.
 - `realtime_server.py`: websocket server for streaming screenshots and executing actions in realtime.
 
 All adapters share `tapp-core`. each adapter handles harness specific concerns (stdio vs websocket, tool discovery vs streaming, auth, rate limiting) while the core stays the same.
