@@ -14,12 +14,22 @@ pub struct CuaClient {
     binary: PathBuf,
 }
 
+impl Default for CuaClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CuaClient {
     /// Create a new client with the default binary path.
+    ///
+    /// The path is taken from the `TAPP_CUA_DRIVER` environment variable when
+    /// set, otherwise falls back to `cua-driver` on `PATH`.
     pub fn new() -> Self {
-        Self {
-            binary: PathBuf::from("/home/ubuntu/.local/lib/nyx-cua/cua-driver"),
-        }
+        let binary = std::env::var_os("TAPP_CUA_DRIVER")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("cua-driver"));
+        Self { binary }
     }
 
     /// Create a new client with a custom binary path.

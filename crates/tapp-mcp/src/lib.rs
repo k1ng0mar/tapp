@@ -53,10 +53,28 @@ impl OverlayClient {
     }
 }
 
+/// Parse a key modifier name, erroring on unknown values instead of
+/// silently substituting something the caller didn't ask for.
+fn parse_modifier(s: &str) -> Result<Modifier> {
+    match s {
+        "ctrl" => Ok(Modifier::Ctrl),
+        "alt" => Ok(Modifier::Alt),
+        "shift" => Ok(Modifier::Shift),
+        "meta" => Ok(Modifier::Meta),
+        other => Err(anyhow::anyhow!("unknown modifier: {other}")),
+    }
+}
+
 /// Tapp MCP server.
 pub struct TappServer {
     cua: CuaClient,
     overlay: Option<OverlayClient>,
+}
+
+impl Default for TappServer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TappServer {
@@ -70,7 +88,13 @@ impl TappServer {
 
     /// Create a new server with overlay enabled.
     pub fn with_overlay() -> Self {
-        let overlay = OverlayClient::spawn().ok();
+        let overlay = match OverlayClient::spawn() {
+            Ok(client) => Some(client),
+            Err(e) => {
+                eprintln!("tapp: overlay disabled, could not spawn tapp-overlay: {e}");
+                None
+            }
+        };
         Self {
             cua: CuaClient::new(),
             overlay,
@@ -229,25 +253,21 @@ impl TappServer {
                 Ok(serde_json::json!({ "ok": true }))
             }
             "tapp_key" => {
-                let action = KeyAction {
-                    key: args["key"].as_str().unwrap_or("").to_string(),
-                    modifiers: args["modifiers"]
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|v| v.as_str())
-                                .map(|s| match s {
-                                    "ctrl" => Modifier::Ctrl,
-                                    "alt" => Modifier::Alt,
-                                    "shift" => Modifier::Shift,
-                                    "meta" => Modifier::Meta,
-                                    _ => Modifier::Ctrl,
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default(),
-                };
-                self.cua.key(action).await?;
+                let key = args["key"].as_str().unwrap_or("").to_string();
+                if key.is_empty() {
+                    return Err(anyhow::anyhow!("tapp_key requires a non-empty key"));
+                }
+                let modifiers: Vec<Modifier> = args["modifiers"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(parse_modifier)
+                            .collect::<Result<Vec<_>>>()
+                    })
+                    .transpose()?
+                    .unwrap_or_default();
+                self.cua.key(KeyAction { key, modifiers }).await?;
                 Ok(serde_json::json!({ "ok": true }))
             }
             "tapp_scroll" => {
@@ -297,6 +317,47 @@ impl TappServer {
                 Ok(serde_json::json!({ "ok": true }))
             }
             _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_modifier_accepts_known_names() {
+        assert!(matches!(parse_modifier("ctrl"), Ok(Modifier::Ctrl)));
+        assert!(matches!(parse_modifier("alt"), Ok(Modifier::Alt)));
+        assert!(matches!(parse_modifier("shift"), Ok(Modifier::Shift)));
+        assert!(matches!(parse_modifier("meta"), Ok(Modifier::Meta)));
+    }
+
+    #[test]
+    fn parse_modifier_rejects_unknown_names() {
+        assert!(parse_modifier("super").is_err());
+        assert!(parse_modifier("").is_err());
+        assert!(parse_modifier("CTRL").is_err());
+    }
+
+    #[test]
+    fn tool_names_are_stable_and_documented() {
+        let tools = TappServer::list_tools();
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|t| t.get("name")?.as_str())
+            .collect();
+        for expected in [
+            "tapp_screenshot",
+            "tapp_click",
+            "tapp_type",
+            "tapp_key",
+            "tapp_scroll",
+            "tapp_drag",
+            "tapp_list_windows",
+            "tapp_bring_to_front",
+        ] {
+            assert!(names.contains(&expected), "missing tool: {expected}");
         }
     }
 }
