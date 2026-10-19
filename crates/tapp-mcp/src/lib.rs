@@ -258,6 +258,161 @@ impl TappServer {
                     "required": ["window_id"],
                 },
             }),
+            serde_json::json!({
+                "name": "tapp_window_state",
+                "description": "Get the accessibility tree for a window",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "window_id": { "type": "string" },
+                    },
+                    "required": ["window_id"],
+                },
+            }),
+            serde_json::json!({
+                "name": "tapp_click_element",
+                "description": "Click an element by its token from tapp_window_state",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "window_id": { "type": "string" },
+                        "element_token": { "type": "string" },
+                        "button": { "type": "string", "enum": ["left", "right", "middle"] },
+                    },
+                    "required": ["window_id", "element_token"],
+                },
+            }),
+            serde_json::json!({
+                "name": "tapp_verify",
+                "description": "Verify state after an action",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "window_id": { "type": "string" },
+                        "predicate": { "type": "object" },
+                    },
+                    "required": ["window_id", "predicate"],
+                },
+            }),
+            serde_json::json!({
+                "name": "tapp_zoom",
+                "description": "Zoom into a window region",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "window_id": { "type": "string" },
+                        "rect": {
+                            "type": "object",
+                            "properties": {
+                                "x": { "type": "number" },
+                                "y": { "type": "number" },
+                                "width": { "type": "number" },
+                                "height": { "type": "number" },
+                            },
+                        },
+                    },
+                    "required": ["window_id"],
+                },
+            }),
+            serde_json::json!({
+                "name": "tapp_invoke_menu",
+                "description": "Invoke a menu path in a window",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "window_id": { "type": "string" },
+                        "menu_path": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                        },
+                    },
+                    "required": ["window_id", "menu_path"],
+                },
+            }),
+            serde_json::json!({
+                "name": "tapp_set_window_frame",
+                "description": "Set window position and size",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "window_id": { "type": "string" },
+                        "x": { "type": "number" },
+                        "y": { "type": "number" },
+                        "width": { "type": "number" },
+                        "height": { "type": "number" },
+                    },
+                    "required": ["window_id", "x", "y", "width", "height"],
+                },
+            }),
+            serde_json::json!({
+                "name": "tapp_launch_app",
+                "description": "Launch an application",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "app_name": { "type": "string" },
+                    },
+                    "required": ["app_name"],
+                },
+            }),
+            serde_json::json!({
+                "name": "tapp_kill_app",
+                "description": "Kill an application by PID",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "pid": { "type": "integer" },
+                    },
+                    "required": ["pid"],
+                },
+            }),
+            serde_json::json!({
+                "name": "tapp_clipboard_read",
+                "description": "Read the clipboard",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                },
+            }),
+            serde_json::json!({
+                "name": "tapp_clipboard_write",
+                "description": "Write to the clipboard",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "text": { "type": "string" },
+                    },
+                    "required": ["text"],
+                },
+            }),
+            serde_json::json!({
+                "name": "tapp_move_cursor",
+                "description": "Move the agent cursor to a point",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "x": { "type": "number" },
+                        "y": { "type": "number" },
+                    },
+                    "required": ["x", "y"],
+                },
+            }),
+            serde_json::json!({
+                "name": "tapp_get_cursor_position",
+                "description": "Get the current cursor position",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                },
+            }),
+            serde_json::json!({
+                "name": "tapp_get_screen_size",
+                "description": "Get the screen size",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                },
+            }),
         ]
     }
 
@@ -267,10 +422,21 @@ impl TappServer {
         match name {
             "tapp_screenshot" => {
                 let screenshot = self.cua.screenshot().await?;
+                let (screen_width, screen_height) = self.cua.get_screen_size().await?;
+                let scale = if screen_width > 0 {
+                    screenshot.width as f32 / screen_width as f32
+                } else {
+                    1.0
+                };
                 Ok(serde_json::json!({
                     "width": screenshot.width,
                     "height": screenshot.height,
                     "base64": screenshot.base64,
+                    "coordinate_frame": {
+                        "screen_width": screen_width,
+                        "screen_height": screen_height,
+                        "scale": scale,
+                    },
                 }))
             }
             "tapp_click" => {
@@ -288,13 +454,19 @@ impl TappServer {
                 // Show overlay before clicking
                 if let Some(ref mut overlay) = self.overlay {
                     let _ = overlay.show_cursor(point, Some("click".to_string()));
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    // Configurable overlay wait, default 100ms (down from 500ms)
+                    let overlay_wait = std::env::var("TAPP_OVERLAY_WAIT_MS")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(100);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(overlay_wait)).await;
                 }
 
                 let action = ClickAction {
                     point,
                     button,
                     clicks,
+                    scope: "desktop".to_string(),
                 };
                 self.cua.click(action).await?;
 
@@ -308,6 +480,7 @@ impl TappServer {
             "tapp_type" => {
                 let action = TypeAction {
                     text: args["text"].as_str().unwrap_or("").to_string(),
+                    delivery_mode: "foreground".to_string(),
                 };
                 self.cua.type_text(action).await?;
                 Ok(serde_json::json!({ "ok": true }))
@@ -327,7 +500,7 @@ impl TappServer {
                     })
                     .transpose()?
                     .unwrap_or_default();
-                self.cua.key(KeyAction { key, modifiers }).await?;
+                self.cua.key(KeyAction { key, modifiers, delivery_mode: "foreground".to_string() }).await?;
                 Ok(serde_json::json!({ "ok": true }))
             }
             "tapp_scroll" => {
@@ -338,6 +511,7 @@ impl TappServer {
                     },
                     delta_x: args["delta_x"].as_i64().unwrap_or(0) as i32,
                     delta_y: args["delta_y"].as_i64().unwrap_or(0) as i32,
+                    scope: "desktop".to_string(),
                 };
                 self.cua.scroll(action).await?;
                 Ok(serde_json::json!({ "ok": true }))
@@ -357,7 +531,7 @@ impl TappServer {
                     let _ = overlay.animate_to(from, to, 500);
                 }
 
-                let action = DragAction { from, to };
+                let action = DragAction { from, to, scope: "desktop".to_string() };
                 self.cua.drag(action).await?;
 
                 // Hide overlay after dragging
@@ -375,6 +549,98 @@ impl TappServer {
                 let window_id = args["window_id"].as_i64().unwrap_or(0);
                 self.cua.bring_to_front(window_id).await?;
                 Ok(serde_json::json!({ "ok": true }))
+            }
+            "tapp_window_state" => {
+                let window_id = args["window_id"].as_str().unwrap_or("").to_string();
+                let state = self.cua.get_window_state(&window_id).await?;
+                Ok(state)
+            }
+            "tapp_click_element" => {
+                let window_id = args["window_id"].as_str().unwrap_or("").to_string();
+                let element_token = args["element_token"].as_str().unwrap_or("").to_string();
+                let button = match args["button"].as_str().unwrap_or("left") {
+                    "right" => MouseButton::Right,
+                    "middle" => MouseButton::Middle,
+                    _ => MouseButton::Left,
+                };
+                self.cua.click_element(&window_id, &element_token, button).await?;
+                Ok(serde_json::json!({ "ok": true }))
+            }
+            "tapp_verify" => {
+                let window_id = args["window_id"].as_str().unwrap_or("").to_string();
+                let predicate = args["predicate"].clone();
+                let result = self.cua.verify_state(&window_id, predicate).await?;
+                Ok(result)
+            }
+            "tapp_zoom" => {
+                let window_id = args["window_id"].as_str().unwrap_or("").to_string();
+                let rect = args["rect"].as_object().map(|r| Rect {
+                    x: r.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    y: r.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    width: r.get("width").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    height: r.get("height").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                });
+                let result = self.cua.zoom(&window_id, rect).await?;
+                Ok(result)
+            }
+            "tapp_invoke_menu" => {
+                let window_id = args["window_id"].as_str().unwrap_or("").to_string();
+                let menu_path: Vec<String> = args["menu_path"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                self.cua.invoke_menu(&window_id, menu_path).await?;
+                Ok(serde_json::json!({ "ok": true }))
+            }
+            "tapp_set_window_frame" => {
+                let window_id = args["window_id"].as_str().unwrap_or("").to_string();
+                let rect = Rect {
+                    x: args["x"].as_i64().unwrap_or(0) as i32,
+                    y: args["y"].as_i64().unwrap_or(0) as i32,
+                    width: args["width"].as_i64().unwrap_or(0) as i32,
+                    height: args["height"].as_i64().unwrap_or(0) as i32,
+                };
+                self.cua.set_window_frame(&window_id, rect).await?;
+                Ok(serde_json::json!({ "ok": true }))
+            }
+            "tapp_launch_app" => {
+                let app_name = args["app_name"].as_str().unwrap_or("").to_string();
+                self.cua.launch_app(&app_name).await?;
+                Ok(serde_json::json!({ "ok": true }))
+            }
+            "tapp_kill_app" => {
+                let pid = args["pid"].as_i64().unwrap_or(0) as i32;
+                self.cua.kill_app(pid).await?;
+                Ok(serde_json::json!({ "ok": true }))
+            }
+            "tapp_clipboard_read" => {
+                let text = self.cua.clipboard_read().await?;
+                Ok(serde_json::json!({ "text": text }))
+            }
+            "tapp_clipboard_write" => {
+                let text = args["text"].as_str().unwrap_or("").to_string();
+                self.cua.clipboard_write(&text).await?;
+                Ok(serde_json::json!({ "ok": true }))
+            }
+            "tapp_move_cursor" => {
+                let point = Point {
+                    x: args["x"].as_i64().unwrap_or(0) as i32,
+                    y: args["y"].as_i64().unwrap_or(0) as i32,
+                };
+                self.cua.move_cursor(point).await?;
+                Ok(serde_json::json!({ "ok": true }))
+            }
+            "tapp_get_cursor_position" => {
+                let pos = self.cua.get_cursor_position().await?;
+                Ok(serde_json::json!({ "x": pos.x, "y": pos.y }))
+            }
+            "tapp_get_screen_size" => {
+                let (width, height) = self.cua.get_screen_size().await?;
+                Ok(serde_json::json!({ "width": width, "height": height }))
             }
             _ => {
                 diagnostic_log::log("tool_unknown", Some(&format!("tool={}", name)));
@@ -419,6 +685,19 @@ mod tests {
             "tapp_drag",
             "tapp_list_windows",
             "tapp_bring_to_front",
+            "tapp_window_state",
+            "tapp_click_element",
+            "tapp_verify",
+            "tapp_zoom",
+            "tapp_invoke_menu",
+            "tapp_set_window_frame",
+            "tapp_launch_app",
+            "tapp_kill_app",
+            "tapp_clipboard_read",
+            "tapp_clipboard_write",
+            "tapp_move_cursor",
+            "tapp_get_cursor_position",
+            "tapp_get_screen_size",
         ] {
             assert!(names.contains(&expected), "missing tool: {expected}");
         }

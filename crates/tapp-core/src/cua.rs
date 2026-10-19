@@ -87,7 +87,26 @@ impl CuaClient {
                     MouseButton::Middle => "middle",
                 },
                 "count": action.clicks,
-                "scope": "desktop",
+                "scope": action.scope,
+            }),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Click an element by token.
+    pub async fn click_element(&self, window_id: &str, element_token: &str, button: MouseButton) -> Result<()> {
+        self.call(
+            "click",
+            serde_json::json!({
+                "window_id": window_id,
+                "element_token": element_token,
+                "button": match button {
+                    MouseButton::Left => "left",
+                    MouseButton::Right => "right",
+                    MouseButton::Middle => "middle",
+                },
+                "scope": "element",
             }),
         )
         .await?;
@@ -100,7 +119,7 @@ impl CuaClient {
             "type_text",
             serde_json::json!({
                 "text": action.text,
-                "delivery_mode": "foreground",
+                "delivery_mode": action.delivery_mode,
             }),
         )
         .await?;
@@ -114,7 +133,7 @@ impl CuaClient {
             serde_json::json!({
                 "key": action.key,
                 "modifiers": action.modifiers,
-                "delivery_mode": "foreground",
+                "delivery_mode": action.delivery_mode,
             }),
         )
         .await?;
@@ -130,7 +149,7 @@ impl CuaClient {
                 "y": action.point.y,
                 "delta_x": action.delta_x,
                 "delta_y": action.delta_y,
-                "scope": "desktop",
+                "scope": action.scope,
             }),
         )
         .await?;
@@ -146,7 +165,7 @@ impl CuaClient {
                 "from_y": action.from.y,
                 "to_x": action.to.x,
                 "to_y": action.to.y,
-                "scope": "desktop",
+                "scope": action.scope,
             }),
         )
         .await?;
@@ -209,6 +228,55 @@ impl CuaClient {
     /// Kill an app by pid.
     pub async fn kill_app(&self, pid: i32) -> Result<()> {
         self.call("kill_app", serde_json::json!({ "pid": pid })).await?;
+        Ok(())
+    }
+
+    /// Verify state after an action.
+    pub async fn verify_state(&self, window_id: &str, predicate: Value) -> Result<Value> {
+        self.call(
+            "verify_state",
+            serde_json::json!({ "window_id": window_id, "predicate": predicate }),
+        )
+        .await
+    }
+
+    /// Zoom into a window region.
+    pub async fn zoom(&self, window_id: &str, rect: Option<Rect>) -> Result<Value> {
+        let mut args = serde_json::json!({ "window_id": window_id });
+        if let Some(r) = rect {
+            args["rect"] = serde_json::json!({
+                "x": r.x,
+                "y": r.y,
+                "width": r.width,
+                "height": r.height,
+            });
+        }
+        self.call("zoom", args).await
+    }
+
+    /// Invoke a menu path.
+    pub async fn invoke_menu(&self, window_id: &str, menu_path: Vec<String>) -> Result<()> {
+        self.call(
+            "invoke_menu",
+            serde_json::json!({ "window_id": window_id, "menu_path": menu_path }),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Set window frame (position and size).
+    pub async fn set_window_frame(&self, window_id: &str, rect: Rect) -> Result<()> {
+        self.call(
+            "set_window_frame",
+            serde_json::json!({
+                "window_id": window_id,
+                "x": rect.x,
+                "y": rect.y,
+                "width": rect.width,
+                "height": rect.height,
+            }),
+        )
+        .await?;
         Ok(())
     }
 

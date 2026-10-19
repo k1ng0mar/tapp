@@ -31,14 +31,27 @@ Both `tapp-mcp` and `realtime_server.py` log events to `~/.cache/tapp/events.jso
 
 ## Tools
 
-- `tapp_screenshot`: take a screenshot
+- `tapp_screenshot`: take a screenshot (includes coordinate frame)
 - `tapp_click`: click at a point
+- `tapp_click_element`: click an element by token from tapp_window_state
 - `tapp_type`: type text
 - `tapp_key`: press a key
 - `tapp_scroll`: scroll at a point
 - `tapp_drag`: drag from one point to another
 - `tapp_list_windows`: list all open windows
 - `tapp_bring_to_front`: bring a window to front
+- `tapp_window_state`: get accessibility tree for a window
+- `tapp_verify`: verify state after an action
+- `tapp_zoom`: zoom into a window region
+- `tapp_invoke_menu`: invoke a menu path in a window
+- `tapp_set_window_frame`: set window position and size
+- `tapp_launch_app`: launch an application
+- `tapp_kill_app`: kill an application by PID
+- `tapp_clipboard_read`: read the clipboard
+- `tapp_clipboard_write`: write to the clipboard
+- `tapp_move_cursor`: move the agent cursor
+- `tapp_get_cursor_position`: get cursor position
+- `tapp_get_screen_size`: get screen size
 
 ## Configuration
 
@@ -53,6 +66,7 @@ The realtime websocket server reads its config from the environment:
 - `TAPP_WS_PORT`: port, defaults to `8765`
 - `TAPP_WS_TOKEN`: when set, clients must authenticate with
   `{"type": "auth", "token": "..."}` as their first message
+- `TAPP_OVERLAY_WAIT_MS`: overlay wait before acting, defaults to 100ms
 
 Key modifiers are case-sensitive: `ctrl`, `alt`, `shift`, `meta`. Unknown
 modifiers are rejected.
