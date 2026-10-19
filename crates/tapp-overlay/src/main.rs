@@ -7,7 +7,6 @@ use anyhow::Result;
 use std::io::{self, BufRead, Write};
 use std::sync::Arc;
 use tapp_core::types::{OverlayEvent, Point};
-use tracing;
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{
     Arc as XArc, ChangeGCAux, ConfigureWindowAux, ConnectionExt, CreateGCAux, CreateWindowAux,

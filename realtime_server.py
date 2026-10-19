@@ -2,12 +2,26 @@
 """Realtime computer use stream server for tapp. Uses tapp-mcp for permissions."""
 
 import asyncio
+import hmac
 import json
 import os
+import shutil
 import websockets
 
-TAPP_MCP = "/home/ubuntu/projects/tapp/target/debug/tapp-mcp"
-DISPLAY = ":1"
+# tapp-mcp binary: explicit path via TAPP_MCP_BIN, otherwise whatever is on PATH.
+TAPP_MCP = os.environ.get("TAPP_MCP_BIN") or shutil.which("tapp-mcp")
+if not TAPP_MCP:
+    raise SystemExit(
+        "tapp-mcp not found: set TAPP_MCP_BIN or put tapp-mcp on PATH"
+    )
+DISPLAY = os.environ.get("DISPLAY", ":1")
+
+# Network surface: localhost-only by default, override with TAPP_WS_BIND.
+# When TAPP_WS_TOKEN is set, every client must authenticate with its first
+# message: {"type": "auth", "token": "<token>"}.
+WS_BIND = os.environ.get("TAPP_WS_BIND", "127.0.0.1")
+WS_PORT = int(os.environ.get("TAPP_WS_PORT", "8765"))
+WS_TOKEN = os.environ.get("TAPP_WS_TOKEN")
 
 
 class TappMCP:
@@ -89,8 +103,24 @@ class TappMCP:
             return False
 
 
+async def authenticate(websocket) -> bool:
+    """First-message token auth. No token configured means no auth required."""
+    if not WS_TOKEN:
+        return True
+    try:
+        raw = await asyncio.wait_for(websocket.recv(), timeout=10)
+        auth = json.loads(raw)
+    except Exception:
+        return False
+    token = auth.get("token", "") if isinstance(auth, dict) else ""
+    return auth.get("type") == "auth" and hmac.compare_digest(token, WS_TOKEN)
+
+
 async def handler(websocket, tapp):
     """Handle a client connection."""
+    if not await authenticate(websocket):
+        await websocket.close(code=4401, reason="unauthorized")
+        return
     try:
         async for message in websocket:
             data = json.loads(message)
@@ -125,7 +155,13 @@ async def main():
     async def wrapped_handler(websocket):
         await handler(websocket, tapp)
 
-    server = await websockets.serve(wrapped_handler, "0.0.0.0", 8765)
+    if WS_BIND != "127.0.0.1" and not WS_TOKEN:
+        print(
+            f"WARNING: binding {WS_BIND} without TAPP_WS_TOKEN set. "
+            "Anyone on the network can drive the desktop. Set TAPP_WS_TOKEN."
+        )
+    print(f"tapp realtime server on {WS_BIND}:{WS_PORT}")
+    server = await websockets.serve(wrapped_handler, WS_BIND, WS_PORT)
     await server.wait_closed()
 
 
