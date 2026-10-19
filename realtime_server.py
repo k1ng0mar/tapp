@@ -6,7 +6,27 @@ import hmac
 import json
 import os
 import shutil
+import time
 import websockets
+
+LOG_FILE = os.path.expanduser("~/.cache/tapp/events.jsonl")
+
+
+def log_event(event: str, meta=None):
+    """Diagnostic event log. Event types and metadata only, no content."""
+    if os.environ.get("TAPP_DIAGNOSTIC_LOG") == "0":
+        return
+    os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+    ts = int(time.time() * 1000)
+    line = '{"ts":%d,"event":"%s"' % (ts, event)
+    if meta:
+        line += ',"meta":%s' % json.dumps(meta)
+    line += "}\n"
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(line)
+    except Exception:
+        pass
 
 # tapp-mcp binary: explicit path via TAPP_MCP_BIN, otherwise whatever is on PATH.
 TAPP_MCP = os.environ.get("TAPP_MCP_BIN") or shutil.which("tapp-mcp")
@@ -111,9 +131,13 @@ async def authenticate(websocket) -> bool:
         raw = await asyncio.wait_for(websocket.recv(), timeout=10)
         auth = json.loads(raw)
     except Exception:
+        log_event("auth_failed", "timeout_or_invalid_json")
         return False
     token = auth.get("token", "") if isinstance(auth, dict) else ""
-    return auth.get("type") == "auth" and hmac.compare_digest(token, WS_TOKEN)
+    if auth.get("type") == "auth" and hmac.compare_digest(token, WS_TOKEN):
+        return True
+    log_event("auth_failed", "wrong_token_or_type")
+    return False
 
 
 class RateLimiter:
@@ -140,8 +164,11 @@ class RateLimiter:
 
 async def handler(websocket, tapp):
     """Handle a client connection."""
+    client = websocket.remote_address
+    log_event("ws_connect", f"client={client[0]}")
     if not await authenticate(websocket):
         await websocket.close(code=4401, reason="unauthorized")
+        log_event("ws_disconnect", f"client={client[0]},reason=unauthorized")
         return
     limiter = RateLimiter(rate=10.0, burst=20)
     try:
@@ -150,6 +177,7 @@ async def handler(websocket, tapp):
             data = json.loads(message)
 
             if data.get("type") == "screenshot":
+                log_event("ws_screenshot_request", f"client={client[0]}")
                 screenshot = await tapp.screenshot()
                 if screenshot:
                     await websocket.send(json.dumps({
@@ -158,7 +186,9 @@ async def handler(websocket, tapp):
                     }))
 
             elif data.get("type") == "action":
-                success = await tapp.execute_action(data.get("action", {}))
+                action = data.get("action", {})
+                log_event("ws_action_request", f"client={client[0]},tool={action.get('tool', 'unknown')}")
+                success = await tapp.execute_action(action)
                 await websocket.send(json.dumps({
                     "type": "action_result",
                     "success": success
@@ -168,7 +198,9 @@ async def handler(websocket, tapp):
                 await websocket.send(json.dumps({"type": "pong"}))
 
     except websockets.exceptions.ConnectionClosed:
-        pass
+        log_event("ws_disconnect", f"client={client[0]},reason=closed")
+    except Exception as e:
+        log_event("ws_error", f"client={client[0]},error={type(e).__name__}")
 
 
 async def main():

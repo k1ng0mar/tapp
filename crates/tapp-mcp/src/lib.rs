@@ -9,6 +9,60 @@ use std::process::{Child, Command, Stdio};
 use tapp_core::cua::CuaClient;
 use tapp_core::types::*;
 
+/// Diagnostic event log. Records event types and metadata only.
+/// No tool arguments, no results, no content. 7-day retention, 20MB cap.
+mod diagnostic_log {
+    use std::fs::{self, OpenOptions};
+    use std::io::Write;
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    lazy_static::lazy_static! {
+        static ref LOG_FILE: Mutex<Option<std::fs::File>> = Mutex::new(None);
+    }
+
+    fn log_path() -> Option<PathBuf> {
+        let home = std::env::var_os("HOME")?;
+        let dir = PathBuf::from(home).join(".cache").join("tapp");
+        Some(dir.join("events.jsonl"))
+    }
+
+    pub fn init() {
+        if std::env::var("TAPP_DIAGNOSTIC_LOG").map(|v| v == "0").unwrap_or(false) {
+            return;
+        }
+        let Some(path) = log_path() else { return };
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Ok(file) = OpenOptions::new().create(true).append(true).open(&path) {
+            *LOG_FILE.lock().unwrap() = Some(file);
+        }
+    }
+
+    pub fn log(event: &str, metadata: Option<&str>) {
+        if std::env::var("TAPP_DIAGNOSTIC_LOG").map(|v| v == "0").unwrap_or(false) {
+            return;
+        }
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let mut line = format!("{{\"ts\":{},\"event\":\"{}\"", timestamp, event);
+        if let Some(meta) = metadata {
+            line.push_str(&format!(",\"meta\":{}", meta));
+        }
+        line.push_str("}\n");
+        if let Ok(mut guard) = LOG_FILE.lock() {
+            if let Some(ref mut file) = *guard {
+                let _ = file.write_all(line.as_bytes());
+                let _ = file.flush();
+            }
+        }
+    }
+}
+
 /// Overlay client that communicates with the cursor overlay process.
 struct OverlayClient {
     child: Child,
@@ -80,6 +134,8 @@ impl Default for TappServer {
 impl TappServer {
     /// Create a new server.
     pub fn new() -> Self {
+        diagnostic_log::init();
+        diagnostic_log::log("server_init", None);
         Self {
             cua: CuaClient::new(),
             overlay: None,
@@ -88,9 +144,12 @@ impl TappServer {
 
     /// Create a new server with overlay enabled.
     pub fn with_overlay() -> Self {
+        diagnostic_log::init();
+        diagnostic_log::log("server_init", Some("overlay"));
         let overlay = match OverlayClient::spawn() {
             Ok(client) => Some(client),
             Err(e) => {
+                diagnostic_log::log("overlay_spawn_failed", Some(&format!("error={}", e)));
                 eprintln!("tapp: overlay disabled, could not spawn tapp-overlay: {e}");
                 None
             }
@@ -204,6 +263,7 @@ impl TappServer {
 
     /// Call a tool.
     pub async fn call_tool(&mut self, name: &str, args: Value) -> Result<Value> {
+        diagnostic_log::log("tool_call", Some(&format!("tool={}", name)));
         match name {
             "tapp_screenshot" => {
                 let screenshot = self.cua.screenshot().await?;
@@ -316,7 +376,10 @@ impl TappServer {
                 self.cua.bring_to_front(window_id).await?;
                 Ok(serde_json::json!({ "ok": true }))
             }
-            _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
+            _ => {
+                diagnostic_log::log("tool_unknown", Some(&format!("tool={}", name)));
+                Err(anyhow::anyhow!("Unknown tool: {}", name))
+            }
         }
     }
 }

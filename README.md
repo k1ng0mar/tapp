@@ -12,9 +12,22 @@ Not every Pantheon user wants computer use. Tapp is opt-in. Add it to your Panth
 
 ## Architecture
 
-- `tapp-core`: shared types and cua client
-- `tapp-mcp`: MCP server exposing computer use tools
-- `tapp-overlay`: cursor overlay binary (Clicky pattern)
+Tapp follows an adapter pattern: one core engine, multiple harness integrations.
+
+- `tapp-core`: shared types and cua client. talks to cua-driver over a unix socket.
+- `tapp-mcp`: MCP server exposing `tapp_*` tools to Pantheon or any MCP harness.
+- `tapp-overlay`: cursor overlay binary (Clicky pattern). shows where the agent is about to click.
+- `realtime_server.py`: websocket server for streaming screenshots and executing actions in realtime.
+
+All adapters share `tapp-core`. each adapter handles harness specific concerns (stdio vs websocket, tool discovery vs streaming, auth, rate limiting) while the core stays the same.
+
+### Input translation
+
+cua-driver handles low level input on Linux. window targeted input (naming a specific window) is translated to desktop level XTEST calls when needed, because GTK4 and Qt ignore `XSendEvent`. Tapp does not implement this translation itself. it delegates to cua-driver, which already handles the X11 input layer.
+
+### Diagnostic logging
+
+Both `tapp-mcp` and `realtime_server.py` log events to `~/.cache/tapp/events.jsonl`. the log records event types and metadata only: no tool arguments, no results, no content. set `TAPP_DIAGNOSTIC_LOG=0` to disable.
 
 ## Tools
 
