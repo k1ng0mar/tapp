@@ -116,13 +116,37 @@ async def authenticate(websocket) -> bool:
     return auth.get("type") == "auth" and hmac.compare_digest(token, WS_TOKEN)
 
 
+class RateLimiter:
+    """Simple token bucket rate limiter."""
+
+    def __init__(self, rate: float = 10.0, burst: int = 20):
+        self.rate = rate
+        self.burst = burst
+        self.tokens = float(burst)
+        self.last = asyncio.get_event_loop().time()
+
+    async def acquire(self):
+        now = asyncio.get_event_loop().time()
+        elapsed = now - self.last
+        self.last = now
+        self.tokens = min(self.burst, self.tokens + elapsed * self.rate)
+        if self.tokens < 1:
+            wait = (1 - self.tokens) / self.rate
+            await asyncio.sleep(wait)
+            self.tokens = 0
+        else:
+            self.tokens -= 1
+
+
 async def handler(websocket, tapp):
     """Handle a client connection."""
     if not await authenticate(websocket):
         await websocket.close(code=4401, reason="unauthorized")
         return
+    limiter = RateLimiter(rate=10.0, burst=20)
     try:
         async for message in websocket:
+            await limiter.acquire()
             data = json.loads(message)
 
             if data.get("type") == "screenshot":

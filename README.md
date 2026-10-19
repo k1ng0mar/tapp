@@ -35,10 +35,14 @@ The cua-driver binary is resolved from `TAPP_CUA_DRIVER`, falling back to
 The realtime websocket server reads its config from the environment:
 
 - `TAPP_MCP_BIN`: path to the `tapp-mcp` binary (or put it on `PATH`)
+- `DISPLAY`: X11 display, defaults to `:1`
 - `TAPP_WS_BIND`: bind address, defaults to `127.0.0.1`
 - `TAPP_WS_PORT`: port, defaults to `8765`
 - `TAPP_WS_TOKEN`: when set, clients must authenticate with
   `{"type": "auth", "token": "..."}` as their first message
+
+Key modifiers are case-sensitive: `ctrl`, `alt`, `shift`, `meta`. Unknown
+modifiers are rejected.
 
 ## Install
 
