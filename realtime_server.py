@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""Realtime computer use stream server for tapp. Uses tapp-mcp for permissions."""
+
+import asyncio
+import json
+import os
+import websockets
+
+TAPP_MCP = "/home/ubuntu/projects/tapp/target/debug/tapp-mcp"
+DISPLAY = ":1"
+
+
+class TappMCP:
+    """JSON-RPC client for tapp-mcp."""
+
+    def __init__(self):
+        self.proc = None
+        self.req_id = 0
+
+    async def start(self):
+        env = os.environ.copy()
+        env["DISPLAY"] = DISPLAY
+        self.proc = await asyncio.create_subprocess_exec(
+            TAPP_MCP,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+            limit=1024 * 1024,
+        )
+        await self._request("initialize", {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "tapp-realtime", "version": "0.1.0"},
+        })
+        notif = {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}
+        body = json.dumps(notif)
+        self.proc.stdin.write(body.encode() + b"\n")
+        await self.proc.stdin.drain()
+
+    async def _request(self, method, params, timeout=15):
+        self.req_id += 1
+        req = {"jsonrpc": "2.0", "id": self.req_id, "method": method, "params": params}
+        body = json.dumps(req)
+        self.proc.stdin.write(body.encode() + b"\n")
+        await self.proc.stdin.drain()
+
+        async def read_response():
+            line = await self.proc.stdout.readuntil(b'\n')
+            if not line:
+                raise Exception("tapp-mcp stdout closed")
+            return json.loads(line.decode())
+
+        try:
+            return await asyncio.wait_for(read_response(), timeout=timeout)
+        except asyncio.TimeoutError:
+            raise Exception(f"timeout waiting for response to {method}")
+
+    async def call_tool(self, name, args):
+        result = await self._request("tools/call", {"name": name, "arguments": args})
+        if "error" in result:
+            raise Exception(result["error"])
+        return result.get("result", {})
+
+    async def screenshot(self):
+        result = await self.call_tool("tapp_screenshot", {})
+        content = result.get("content", [])
+        for item in content:
+            if item.get("type") == "text":
+                text = item.get("text", "{}")
+                data = json.loads(text)
+                b64 = data.get("base64", "")
+                if b64:
+                    return {
+                        "base64": b64,
+                        "width": data.get("width", 1920),
+                        "height": data.get("height", 1080),
+                    }
+        return None
+
+    async def execute_action(self, action):
+        tool = action.get("tool")
+        args = action.get("args", {})
+        try:
+            await self.call_tool(f"tapp_{tool}", args)
+            return True
+        except Exception as e:
+            print(f"action failed: {e}")
+            return False
+
+
+async def handler(websocket, tapp):
+    """Handle a client connection."""
+    try:
+        async for message in websocket:
+            data = json.loads(message)
+
+            if data.get("type") == "screenshot":
+                screenshot = await tapp.screenshot()
+                if screenshot:
+                    await websocket.send(json.dumps({
+                        "type": "screenshot",
+                        "data": screenshot
+                    }))
+
+            elif data.get("type") == "action":
+                success = await tapp.execute_action(data.get("action", {}))
+                await websocket.send(json.dumps({
+                    "type": "action_result",
+                    "success": success
+                }))
+
+            elif data.get("type") == "ping":
+                await websocket.send(json.dumps({"type": "pong"}))
+
+    except websockets.exceptions.ConnectionClosed:
+        pass
+
+
+async def main():
+    """Start the server."""
+    tapp = TappMCP()
+    await tapp.start()
+
+    async def wrapped_handler(websocket):
+        await handler(websocket, tapp)
+
+    server = await websockets.serve(wrapped_handler, "0.0.0.0", 8765)
+    await server.wait_closed()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

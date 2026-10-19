@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>tapp realtime stream</title>
+    <style>
+        body { margin: 0; background: #1a1a2e; color: #eee; font-family: monospace; }
+        #screen { width: 100vw; height: 90vh; object-fit: contain; background: #000; }
+        #bar { height: 10vh; display: flex; align-items: center; justify-content: center; gap: 10px; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
+        #status { position: fixed; top: 10px; left: 10px; color: #0f0; }
+    </style>
+</head>
+<body>
+    <div id="status">connecting...</div>
+    <img id="screen">
+    <div id="bar">
+        <button onclick="sendAction({tool:'click', args:{x:960, y:540}})">click center</button>
+        <button onclick="sendAction({tool:'key', args:{key:'Return'}})">enter</button>
+        <button onclick="sendAction({tool:'key', args:{key:'Escape', modifiers:[]}})">esc</button>
+        <button onclick="requestScreenshot()">screenshot</button>
+    </div>
+    <script>
+        const ws = new WebSocket('ws://' + window.location.hostname + ':8765');
+        const img = document.getElementById('screen');
+        const status = document.getElementById('status');
+
+        ws.onopen = () => { status.textContent = 'connected'; requestScreenshot(); };
+        ws.onclose = () => { status.textContent = 'disconnected'; };
+        ws.onmessage = (e) => {
+            const msg = JSON.parse(e.data);
+            if (msg.type === 'screenshot') {
+                img.src = 'data:image/png;base64,' + msg.data.base64;
+            }
+        };
+
+        function requestScreenshot() {
+            ws.send(JSON.stringify({type: 'screenshot'}));
+        }
+
+        function sendAction(action) {
+            ws.send(JSON.stringify({type: 'action', action}));
+        }
+
+        setInterval(requestScreenshot, 500);
+    </script>
+</body>
+</html>
