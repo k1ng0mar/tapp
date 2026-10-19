@@ -33,7 +33,6 @@ impl OverlayState {
         let conn = Arc::new(conn);
         let screen = &conn.setup().roots[screen_num];
 
-        // Create a small fixed size window (50x50) that follows the cursor
         let window = conn.generate_id()?;
         conn.create_window(
             0,
@@ -41,8 +40,8 @@ impl OverlayState {
             screen.root,
             0,
             0,
-            50,
-            50,
+            200,
+            60,
             0,
             WindowClass::INPUT_OUTPUT,
             0,
@@ -80,19 +79,17 @@ impl OverlayState {
 
     /// Draw a circle at the cursor position.
     fn draw_cursor(&self) -> Result<()> {
-        // Clear the window
         self.conn.poly_fill_rectangle(
             self.window,
             self.gc,
             &[Rectangle {
                 x: 0,
                 y: 0,
-                width: 50,
-                height: 50,
+                width: 200,
+                height: 60,
             }],
         )?;
 
-        // Draw a filled circle
         self.conn.poly_fill_arc(
             self.window,
             self.gc,
@@ -106,7 +103,6 @@ impl OverlayState {
             }],
         )?;
 
-        // Draw a border
         self.conn.poly_arc(
             self.window,
             self.gc,
@@ -149,10 +145,8 @@ impl OverlayState {
         let steps = 10;
         for i in 0..=steps {
             let t = i as f64 / steps as f64;
-            let r = (0.0 + (0x00 as f64 - 0x00 as f64) * t) as u32;
-            let g = (0.0 + (0xFF as f64 - 0x00 as f64) * t) as u32;
-            let b = (0.0 + (0x00 as f64 - 0x00 as f64) * t) as u32;
-            let color = (r << 16) | (g << 8) | b;
+            let g = (0xFF as f64 * t) as u32;
+            let color = g << 8;
 
             self.conn.change_gc(
                 self.gc,
@@ -166,15 +160,31 @@ impl OverlayState {
         Ok(())
     }
 
-    /// Draw the label text below the cursor.
     fn draw_label(&self) -> Result<()> {
         if let Some(ref text) = self.label {
             let text_bytes = text.as_bytes();
+            let text_width = text_bytes.len() as i16 * 8;
+            let bg_x = 50;
+            let bg_y = 10;
+            let bg_width = text_width + 16;
+            let bg_height = 30;
+
+            self.conn.poly_fill_rectangle(
+                self.window,
+                self.gc,
+                &[Rectangle {
+                    x: bg_x,
+                    y: bg_y,
+                    width: bg_width as u16,
+                    height: bg_height as u16,
+                }],
+            )?;
+
             self.conn.poly_text8(
                 self.window,
                 self.gc,
-                5,
-                45,
+                bg_x + 8,
+                bg_y + 20,
                 text_bytes,
             )?;
             self.conn.flush()?;
@@ -202,10 +212,8 @@ impl OverlayState {
         let steps = 10;
         for i in 0..=steps {
             let t = i as f64 / steps as f64;
-            let r = (0x00 as f64 + (0x00 as f64 - 0x00 as f64) * t) as u32;
-            let g = (0xFF as f64 + (0x00 as f64 - 0xFF as f64) * t) as u32;
-            let b = (0x00 as f64 + (0x00 as f64 - 0x00 as f64) * t) as u32;
-            let color = (r << 16) | (g << 8) | b;
+            let g = (0xFF as f64 * (1.0 - t)) as u32;
+            let color = g << 8;
 
             self.conn.change_gc(
                 self.gc,
