@@ -1,7 +1,6 @@
 //! Shared types for Tapp.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 /// A point on screen.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -99,47 +98,7 @@ pub struct DragAction {
 }
 
 
-/// Window state with accessibility tree.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WindowState {
-    pub window_id: String,
-    pub title: String,
-    pub elements: Vec<Element>,
-}
 
-/// An element in the accessibility tree.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Element {
-    pub token: String,
-    pub role: String,
-    pub label: String,
-    pub frame: Rect,
-    pub parent: Option<usize>,
-}
-
-/// Verification result after an action.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Verification {
-    pub success: bool,
-    pub message: String,
-    pub state_before: Option<Value>,
-    pub state_after: Option<Value>,
-}
-
-/// Coordinate frame information.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoordinateFrame {
-    pub width: u32,
-    pub height: u32,
-    pub scale: f32,
-}
-
-/// Refusal code from cua-driver.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Refusal {
-    pub code: String,
-    pub message: String,
-}
 
 /// Overlay event for the cursor overlay.
 #[derive(Debug, Clone, Serialize, Deserialize)]

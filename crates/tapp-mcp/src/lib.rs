@@ -125,6 +125,19 @@ pub struct TappServer {
     overlay: Option<OverlayClient>,
 }
 
+/// Look up the pid for a window_id by listing windows.
+async fn resolve_pid(cua: &CuaClient, window_id: &str) -> Result<i64> {
+    let windows = cua.list_windows().await?;
+    windows
+        .as_array()
+        .and_then(|arr| {
+            arr.iter()
+                .find(|w| w["window_id"].as_str() == Some(window_id))
+                .and_then(|w| w["pid"].as_i64())
+        })
+        .ok_or_else(|| anyhow::anyhow!("window not found: {window_id}"))
+}
+
 impl Default for TappServer {
     fn default() -> Self {
         Self::new()
@@ -288,10 +301,10 @@ impl TappServer {
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "window_id": { "type": "string" },
-                        "predicate": { "type": "object" },
+                        "window_id": { "type": "integer" },
+                        "expect": { "type": "array", "items": { "type": "object" } },
                     },
-                    "required": ["window_id", "predicate"],
+                    "required": ["window_id", "expect"],
                 },
             }),
             serde_json::json!({
@@ -300,7 +313,7 @@ impl TappServer {
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "window_id": { "type": "string" },
+                        "window_id": { "type": "integer" },
                         "rect": {
                             "type": "object",
                             "properties": {
@@ -320,7 +333,7 @@ impl TappServer {
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "window_id": { "type": "string" },
+                        "window_id": { "type": "integer" },
                         "menu_path": {
                             "type": "array",
                             "items": { "type": "string" },
@@ -335,7 +348,7 @@ impl TappServer {
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "window_id": { "type": "string" },
+                        "window_id": { "type": "integer" },
                         "x": { "type": "number" },
                         "y": { "type": "number" },
                         "width": { "type": "number" },
@@ -528,7 +541,11 @@ impl TappServer {
 
                 // Show overlay before dragging
                 if let Some(ref mut overlay) = self.overlay {
-                    let _ = overlay.animate_to(from, to, 500);
+                    let overlay_wait = std::env::var("TAPP_OVERLAY_WAIT_MS")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(500);
+                    let _ = overlay.animate_to(from, to, overlay_wait);
                 }
 
                 let action = DragAction { from, to, scope: "desktop".to_string() };
@@ -552,15 +569,7 @@ impl TappServer {
             }
             "tapp_window_state" => {
                 let window_id = args["window_id"].as_str().unwrap_or("").to_string();
-                let windows = self.cua.list_windows().await?;
-                let pid = windows
-                    .as_array()
-                    .and_then(|arr| {
-                        arr.iter()
-                            .find(|w| w["window_id"].as_str() == Some(window_id.as_str()))
-                            .and_then(|w| w["pid"].as_i64())
-                    })
-                    .ok_or_else(|| anyhow::anyhow!("window not found: {window_id}"))?;
+                let pid = resolve_pid(&self.cua, &window_id).await?;
                 let state = self.cua.get_window_state(&window_id, pid).await?;
                 Ok(state)
             }
@@ -576,25 +585,35 @@ impl TappServer {
                 Ok(serde_json::json!({ "ok": true }))
             }
             "tapp_verify" => {
-                let window_id = args["window_id"].as_str().unwrap_or("").to_string();
-                let predicate = args["predicate"].clone();
-                let result = self.cua.verify_state(&window_id, predicate).await?;
+                let window_id: i64 = args["window_id"].as_i64().ok_or_else(|| anyhow::anyhow!("window_id must be an integer"))?;
+                let pid = resolve_pid(&self.cua, &window_id.to_string()).await?;
+                let expect = args.get("expect").cloned().ok_or_else(|| {
+                    anyhow::anyhow!("tapp_verify requires a non-empty expect array")
+                })?;
+                if expect.as_array().map(|a| a.is_empty()) == Some(true) {
+                    return Err(anyhow::anyhow!(
+                        "tapp_verify requires at least one predicate in expect"
+                    ));
+                }
+                let result = self.cua.verify_state(window_id, pid, expect).await?;
                 Ok(result)
             }
             "tapp_zoom" => {
-                let window_id = args["window_id"].as_str().unwrap_or("").to_string();
+                let window_id: i64 = args["window_id"].as_i64().ok_or_else(|| anyhow::anyhow!("window_id must be an integer"))?;
+                let pid = resolve_pid(&self.cua, &window_id.to_string()).await?;
                 let rect = args["rect"].as_object().map(|r| Rect {
                     x: r.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
                     y: r.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
                     width: r.get("width").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
                     height: r.get("height").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
                 });
-                let result = self.cua.zoom(&window_id, rect).await?;
+                let result = self.cua.zoom(window_id, pid, rect).await?;
                 Ok(result)
             }
             "tapp_invoke_menu" => {
-                let window_id = args["window_id"].as_str().unwrap_or("").to_string();
-                let menu_path: Vec<String> = args["menu_path"]
+                let window_id: i64 = args["window_id"].as_i64().ok_or_else(|| anyhow::anyhow!("window_id must be an integer"))?;
+                let pid = resolve_pid(&self.cua, &window_id.to_string()).await?;
+                let path: Vec<String> = args["menu_path"]
                     .as_array()
                     .map(|arr| {
                         arr.iter()
@@ -602,18 +621,19 @@ impl TappServer {
                             .collect()
                     })
                     .unwrap_or_default();
-                self.cua.invoke_menu(&window_id, menu_path).await?;
+                self.cua.invoke_menu(window_id, pid, path).await?;
                 Ok(serde_json::json!({ "ok": true }))
             }
             "tapp_set_window_frame" => {
-                let window_id = args["window_id"].as_str().unwrap_or("").to_string();
+                let window_id: i64 = args["window_id"].as_i64().ok_or_else(|| anyhow::anyhow!("window_id must be an integer"))?;
+                let pid = resolve_pid(&self.cua, &window_id.to_string()).await?;
                 let rect = Rect {
                     x: args["x"].as_i64().unwrap_or(0) as i32,
                     y: args["y"].as_i64().unwrap_or(0) as i32,
                     width: args["width"].as_i64().unwrap_or(0) as i32,
                     height: args["height"].as_i64().unwrap_or(0) as i32,
                 };
-                self.cua.set_window_frame(&window_id, rect).await?;
+                self.cua.set_window_frame(window_id, pid, rect).await?;
                 Ok(serde_json::json!({ "ok": true }))
             }
             "tapp_launch_app" => {

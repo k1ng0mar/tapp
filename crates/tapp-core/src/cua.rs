@@ -60,9 +60,6 @@ impl CuaClient {
                 if let Some(err_msg) = err_resp["error_code"].as_str() {
                     anyhow::bail!("cua-driver call {} failed: {}", tool, err_msg);
                 }
-                if let Some(err_msg) = err_resp["error_code"].as_str() {
-                    anyhow::bail!("cua-driver call {} failed: {}", tool, err_msg);
-                }
                 if let Some(err_msg) = err_resp["message"].as_str() {
                     anyhow::bail!("cua-driver call {} failed: {}", tool, err_msg);
                 }
@@ -257,17 +254,17 @@ impl CuaClient {
     }
 
     /// Verify state after an action.
-    pub async fn verify_state(&self, window_id: &str, predicate: Value) -> Result<Value> {
+    pub async fn verify_state(&self, window_id: i64, pid: i64, expect: Value) -> Result<Value> {
         self.call(
             "verify_state",
-            serde_json::json!({ "window_id": window_id, "predicate": predicate }),
+            serde_json::json!({ "window_id": window_id, "pid": pid, "expect": expect }),
         )
         .await
     }
 
     /// Zoom into a window region.
-    pub async fn zoom(&self, window_id: &str, rect: Option<Rect>) -> Result<Value> {
-        let mut args = serde_json::json!({ "window_id": window_id });
+    pub async fn zoom(&self, window_id: i64, pid: i64, rect: Option<Rect>) -> Result<Value> {
+        let mut args = serde_json::json!({ "window_id": window_id, "pid": pid });
         if let Some(r) = rect {
             args["rect"] = serde_json::json!({
                 "x": r.x,
@@ -280,21 +277,22 @@ impl CuaClient {
     }
 
     /// Invoke a menu path.
-    pub async fn invoke_menu(&self, window_id: &str, menu_path: Vec<String>) -> Result<()> {
+    pub async fn invoke_menu(&self, window_id: i64, pid: i64, path: Vec<String>) -> Result<()> {
         self.call(
             "invoke_menu",
-            serde_json::json!({ "window_id": window_id, "menu_path": menu_path }),
+            serde_json::json!({ "window_id": window_id, "pid": pid, "path": path }),
         )
         .await?;
         Ok(())
     }
 
     /// Set window frame (position and size).
-    pub async fn set_window_frame(&self, window_id: &str, rect: Rect) -> Result<()> {
+    pub async fn set_window_frame(&self, window_id: i64, pid: i64, rect: Rect) -> Result<()> {
         self.call(
             "set_window_frame",
             serde_json::json!({
                 "window_id": window_id,
+                "pid": pid,
                 "x": rect.x,
                 "y": rect.y,
                 "width": rect.width,
