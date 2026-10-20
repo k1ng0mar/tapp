@@ -128,11 +128,16 @@ pub struct TappServer {
 /// Look up the pid for a window_id by listing windows.
 async fn resolve_pid(cua: &CuaClient, window_id: &str) -> Result<i64> {
     let windows = cua.list_windows().await?;
+    let wanted = window_id.trim();
     windows
         .as_array()
         .and_then(|arr| {
             arr.iter()
-                .find(|w| w["window_id"].as_str() == Some(window_id))
+                .find(|w| match w.get("window_id") {
+                    Some(Value::String(s)) => s == wanted,
+                    Some(Value::Number(n)) => n.to_string() == wanted,
+                    _ => false,
+                })
                 .and_then(|w| w["pid"].as_i64())
         })
         .ok_or_else(|| anyhow::anyhow!("window not found: {window_id}"))
