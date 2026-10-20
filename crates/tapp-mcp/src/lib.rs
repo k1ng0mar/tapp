@@ -127,20 +127,23 @@ pub struct TappServer {
 
 /// Look up the pid for a window_id by listing windows.
 async fn resolve_pid(cua: &CuaClient, window_id: &str) -> Result<i64> {
-    let windows = cua.list_windows().await?;
-    let wanted = window_id.trim();
-    windows
-        .as_array()
-        .and_then(|arr| {
-            arr.iter()
-                .find(|w| match w.get("window_id") {
-                    Some(Value::String(s)) => s == wanted,
-                    Some(Value::Number(n)) => n.to_string() == wanted,
-                    _ => false,
-                })
-                .and_then(|w| w["pid"].as_i64())
-        })
+    let response = cua.list_windows().await?;
+    find_pid_in_list(&response, window_id)
         .ok_or_else(|| anyhow::anyhow!("window not found: {window_id}"))
+}
+
+/// Find a window's pid in a list_windows response, matching window_id as
+/// either a string or a number (the daemon returns it inconsistently).
+fn find_pid_in_list(response: &Value, window_id: &str) -> Option<i64> {
+    let wanted = window_id.trim();
+    let list = response.get("windows")?.as_array()?;
+    list.iter()
+        .find(|w| match w.get("window_id") {
+            Some(Value::String(s)) => s == wanted,
+            Some(Value::Number(n)) => n.to_string() == wanted,
+            _ => false,
+        })
+        .and_then(|w| w["pid"].as_i64())
 }
 
 impl Default for TappServer {
@@ -735,5 +738,30 @@ mod tests {
         ] {
             assert!(names.contains(&expected), "missing tool: {expected}");
         }
+    }
+
+    #[test]
+    fn find_pid_matches_numeric_window_id() {
+        let response: Value = serde_json::from_str(
+            r#"{"windows":[{"window_id":27262979,"pid":1449706,"title":"xfce4-panel"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(find_pid_in_list(&response, "27262979"), Some(1449706));
+    }
+
+    #[test]
+    fn find_pid_matches_string_window_id() {
+        let response: Value = serde_json::from_str(
+            r#"{"windows":[{"window_id":"33554451","pid":1449788,"title":"Desktop"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(find_pid_in_list(&response, "33554451"), Some(1449788));
+    }
+
+    #[test]
+    fn find_pid_returns_none_for_unknown_window() {
+        let response: Value =
+            serde_json::from_str(r#"{"windows":[{"window_id":1,"pid":2}]}"#).unwrap();
+        assert_eq!(find_pid_in_list(&response, "999"), None);
     }
 }
