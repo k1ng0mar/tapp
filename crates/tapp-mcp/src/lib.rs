@@ -552,7 +552,16 @@ impl TappServer {
             }
             "tapp_window_state" => {
                 let window_id = args["window_id"].as_str().unwrap_or("").to_string();
-                let state = self.cua.get_window_state(&window_id).await?;
+                let windows = self.cua.list_windows().await?;
+                let pid = windows
+                    .as_array()
+                    .and_then(|arr| {
+                        arr.iter()
+                            .find(|w| w["window_id"].as_str() == Some(window_id.as_str()))
+                            .and_then(|w| w["pid"].as_i64())
+                    })
+                    .ok_or_else(|| anyhow::anyhow!("window not found: {window_id}"))?;
+                let state = self.cua.get_window_state(&window_id, pid).await?;
                 Ok(state)
             }
             "tapp_click_element" => {

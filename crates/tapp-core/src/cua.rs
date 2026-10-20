@@ -57,6 +57,12 @@ impl CuaClient {
                 if let Some(err_msg) = err_resp["error"].as_str() {
                     anyhow::bail!("cua-driver call {} failed: {}", tool, err_msg);
                 }
+                if let Some(err_msg) = err_resp["error_code"].as_str() {
+                    anyhow::bail!("cua-driver call {} failed: {}", tool, err_msg);
+                }
+                if let Some(err_msg) = err_resp["error_code"].as_str() {
+                    anyhow::bail!("cua-driver call {} failed: {}", tool, err_msg);
+                }
                 if let Some(err_msg) = err_resp["message"].as_str() {
                     anyhow::bail!("cua-driver call {} failed: {}", tool, err_msg);
                 }
@@ -197,10 +203,10 @@ impl CuaClient {
     }
 
     /// Get the accessibility tree for a window.
-    pub async fn get_window_state(&self, window_id: &str) -> Result<Value> {
+    pub async fn get_window_state(&self, window_id: &str, pid: i64) -> Result<Value> {
         self.call(
             "get_window_state",
-            serde_json::json!({ "window_id": window_id }),
+            serde_json::json!({ "window_id": window_id, "pid": pid }),
         )
         .await
     }
